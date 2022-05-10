@@ -1,0 +1,12 @@
+numpy
+pandas
+scikit-learn
+matplotlib
+seaborn
+jupyter
+jupyterlab
+tensorflow
+jedi==0.17.2
+openslide-python
+tensorflow-datasets
+tensorflow-probability==0.14.1 
