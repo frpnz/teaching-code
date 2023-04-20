@@ -1,17 +1,17 @@
 import cv2
 import numpy as np
+from PIL import Image
 from matplotlib import cm
 import xml.etree.ElementTree as ET
 from shapely.strtree import STRtree
 from shapely.geometry import Polygon
-from PIL import Image
 
 
-def get_points_base(xml_file, colors_to_use, custom_colors=[]):
+def _get_points_base(xml_file, colors_to_use, custom_colors=[]):
     color_key = ''.join([k for k in colors_to_use])
-    points, map_idx = get_points_xml(xml_file,
-                                     colors_to_use,
-                                     custom_colors)
+    points, map_idx = _get_points_xml(xml_file,
+                                      colors_to_use,
+                                      custom_colors)
     point_polys = [Polygon(point) for point in points]
     return {'points': points.copy(),
             'map_idx': map_idx.copy(),
@@ -19,7 +19,7 @@ def get_points_base(xml_file, colors_to_use, custom_colors=[]):
             'STRtree': STRtree(point_polys)}
 
 
-def color_ref_match_xml(colors_to_use, custom_colors):
+def _color_ref_match_xml(colors_to_use, custom_colors):
     """Given a string or list of strings corresponding to colors to use, returns the hexcodes of those colors"""
 
     color_ref = [(65535, 1, 'yellow'), (65280, 2, 'green'), (255, 3, 'red'), (16711680, 4, 'blue'),
@@ -39,12 +39,12 @@ def color_ref_match_xml(colors_to_use, custom_colors):
     return color_map
 
 
-def get_points_xml(xml_file, colors_to_use, custom_colors):
+def _get_points_xml(xml_file, colors_to_use, custom_colors):
     """Given a set of annotation colors, parses the xml file to get those annotations as lists of verticies"""
-    color_map = color_ref_match_xml(colors_to_use, custom_colors)
+    color_map = _color_ref_match_xml(colors_to_use, custom_colors)
 
     color_key = ''.join([k[2] for k in color_map])
-    full_map = color_ref_match_xml(None, custom_colors)
+    full_map = _color_ref_match_xml(None, custom_colors)
 
     # create element tree object
     tree = ET.parse(xml_file)
@@ -89,8 +89,8 @@ def get_points_xml(xml_file, colors_to_use, custom_colors):
 
 def get_annotation_mask(xml_file,
                         slide,
-                        level_downsample,
-                        colors_to_use=None):
+                        scaling_factor,
+                        colors_to_use):
     """Returns the mask of a tile"""
     coords = (0, 0)
     if 'openslide.bounds-width' in slide.properties.keys():
@@ -110,9 +110,9 @@ def get_annotation_mask(xml_file,
         # Slide dimensions of given level reported to level 0
         region_lv0 = (0, 0, slide.level_dimensions[0][0], slide.level_dimensions[0][1])
     region_lv0 = [round(x) for x in region_lv0]
-    region_lv_selected = [round(x * level_downsample) for x in region_lv0]
+    region_lv0_scaled = [round(x * scaling_factor) for x in region_lv0]
 
-    points_dict = get_points_base(xml_file, colors_to_use)
+    points_dict = _get_points_base(xml_file, colors_to_use)
     points = points_dict['points']
     map_idx = points_dict['map_idx']
     point_polys = points_dict['polygons']
@@ -122,7 +122,7 @@ def get_annotation_mask(xml_file,
                          (coords[0], coords[1] + region_lv0[3]),
                          (coords[0] + region_lv0[2], coords[1] + region_lv0[3]),
                          (coords[0] + region_lv0[2], coords[1])])
-    mask = np.zeros((region_lv_selected[3], region_lv_selected[2]), dtype=np.uint8)
+    mask = np.zeros((region_lv0_scaled[3], region_lv0_scaled[2]), dtype=np.uint8)
 
     if not point_polys:
         point_polys = [Polygon(point) for point in points]
@@ -134,17 +134,17 @@ def get_annotation_mask(xml_file,
     points_maps = [point_map for idx, point_map in enumerate(zip(points, map_idx)) if idx in intersecting_points]
     if points_maps:
         points, map_idx = zip(*points_maps)
-        points = [[(int(p[0] * level_downsample), int(p[1] * level_downsample)) for p in pointSet] for pointSet in
+        points = [[(int(p[0] * scaling_factor), int(p[1] * scaling_factor)) for p in pointSet] for pointSet in
                   points]
-        coords = tuple([int(c * level_downsample) for c in coords])
+        coords = tuple([int(c * scaling_factor) for c in coords])
         points = [[(int(p[0] - coords[0]), int(p[1] - coords[1])) for p in pointSet] for pointSet in points]
         for annCount, pointSet in enumerate(points):
             cv2.fillPoly(mask, [np.asarray(pointSet).reshape((-1, 1, 2))], map_idx[annCount])
-    mask[mask!=0] = 255
+    mask[mask != 0] = 255
     return mask
 
 
-def overlap(slide, mask, level_downsample,colormap=cm.get_cmap('Blues')):
+def overlap(slide, mask, scaling_factor, colormap=cm.get_cmap('Blues')):
 
     if 'openslide.bounds-width' in slide.properties.keys():
         # Here to consider only the rectangle bounding the non-empty region of the slide, if available.
@@ -164,8 +164,8 @@ def overlap(slide, mask, level_downsample,colormap=cm.get_cmap('Blues')):
         region_lv0 = (0, 0, slide.level_dimensions[0][0], slide.level_dimensions[0][1])
 
     region_lv0 = [round(x) for x in region_lv0]
-    region_lv_selected = [round(x * level_downsample) for x in region_lv0]
-    slide_image = slide.get_thumbnail((region_lv_selected[2], region_lv_selected[3]))
+    region_lv0_scaled = [round(x * scaling_factor) for x in region_lv0]
+    slide_image = slide.get_thumbnail((region_lv0_scaled[2], region_lv0_scaled[3]))
     map_ = colormap(mask)
     roi_map = Image.fromarray((map_ * 255).astype('uint8'))
     roi_map.putalpha(75)
